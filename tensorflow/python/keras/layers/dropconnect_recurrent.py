@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 # pylint: disable=protected-access
-"""Recurrent layers with DropConnect and their base classes.
+"""DropconnectRecurrent layers and their base classes.
 """
 from __future__ import absolute_import
 from __future__ import division
@@ -315,6 +315,8 @@ class DropConnectLSTMCell(DropoutRNNCellMixin, Layer):
       Fraction of the weight units to drop.
     recurrent_kernel_dropout: Float between 0 and 1.
       Fraction of the weight units to drop.
+    use_mc_dropout: Bool when True layer always acts like in "train mode"
+      so dropout can be applied also in inference mode
     implementation: Implementation mode, either 1 or 2.
       Mode 1 will structure its operations as a larger number of
       smaller dot products and additions, whereas mode 2 will
@@ -349,6 +351,7 @@ class DropConnectLSTMCell(DropoutRNNCellMixin, Layer):
                recurrent_dropout=0.,
                kernel_dropout=0.,
                recurrent_kernel_dropout=0.,
+               use_mc_dropout=False,
                implementation=1,
                **kwargs):
     super(DropConnectLSTMCell, self).__init__(**kwargs)
@@ -374,6 +377,7 @@ class DropConnectLSTMCell(DropoutRNNCellMixin, Layer):
     self.recurrent_dropout = min(1., max(0., recurrent_dropout))
     self.kernel_dropout = min(1., max(0., kernel_dropout))
     self.recurrent_kernel_dropout = min(1., max(0., recurrent_kernel_dropout))
+    self.use_mc_dropout = use_mc_dropout
     self.implementation = implementation
     assert implementation == 1, 'Implementation 2 is not implemented yet with DropConnect use LSTMCell instead'
     # tuple(_ListWrapper) was silently dropping list content in at least 2.7.10,
@@ -452,6 +456,9 @@ class DropConnectLSTMCell(DropoutRNNCellMixin, Layer):
     return c, o
 
   def call(self, inputs, states, training=True):
+    if self.use_mc_dropout:
+        training = True
+
     h_tm1 = states[0]  # previous memory state
     c_tm1 = states[1]  # previous carry state
 
@@ -629,6 +636,8 @@ class DropConnectLSTM(RNN):
       Fraction of the weight units to drop.
     recurrent_kernel_dropout: Float between 0 and 1.
       Fraction of the weight units to drop.
+    use_mc_dropout: Bool when True layer always acts like in "train mode"
+      so dropout can be applied also in inference mode
     implementation: Implementation mode, either 1 or 2.
       Mode 1 will structure its operations as a larger number of
       smaller dot products and additions, whereas mode 2 will
@@ -692,6 +701,7 @@ class DropConnectLSTM(RNN):
                recurrent_dropout=0.,
                kernel_dropout=0.,
                recurrent_kernel_dropout=0.,
+               use_mc_dropout=False,
                implementation=1,
                return_sequences=False,
                return_state=False,
@@ -722,6 +732,7 @@ class DropConnectLSTM(RNN):
         recurrent_dropout=recurrent_dropout,
         kernel_dropout=kernel_dropout,
         recurrent_kernel_dropout=recurrent_kernel_dropout,
+        use_mc_dropout=use_mc_dropout,
         implementation=implementation,
         dtype=kwargs.get('dtype'))
     super(DropConnectLSTM, self).__init__(
@@ -808,6 +819,10 @@ class DropConnectLSTM(RNN):
     return self.cell.recurrent_dropout
 
   @property
+  def use_mc_dropout(self):
+    return  self.cell.use_mc_dropout
+
+  @property
   def implementation(self):
     return self.cell.implementation
 
@@ -851,6 +866,7 @@ class DropConnectLSTM(RNN):
           self.kernel_dropout,
         'recurrent_kernel_dropout':
           self.recurrent_kernel_dropout,
+        'use_mc_dropout': self.use_mc_dropout,
         'implementation':
             self.implementation
     }

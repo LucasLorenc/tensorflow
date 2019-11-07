@@ -1199,6 +1199,10 @@ class DropConnectDense(Layer):
     bias_constraint: Constraint function applied to the bias vector.
     kernel_dropout: Float between 0 and 1.
       Fraction of the weight units to drop.
+    unit_dropout: Float between 0 and 1.
+      Fraction of the inputs to drop.
+    use_mc_dropout: Bool when True layer always acts like in "train mode"
+      so dropout can be applied also in inference mode
 
   Input shape:
     N-D tensor with shape: `(batch_size, ..., input_dim)`.
@@ -1223,6 +1227,8 @@ class DropConnectDense(Layer):
                kernel_constraint=None,
                bias_constraint=None,
                kernel_dropout=0.,
+               unit_dropout=0.,
+               use_mc_dropout=False,
                **kwargs):
     if 'input_shape' not in kwargs and 'input_dim' in kwargs:
       kwargs['input_shape'] = (kwargs.pop('input_dim'),)
@@ -1240,6 +1246,8 @@ class DropConnectDense(Layer):
     self.kernel_constraint = constraints.get(kernel_constraint)
     self.bias_constraint = constraints.get(bias_constraint)
     self.kernel_dropout = min(1., max(0., kernel_dropout))
+    self.unit_dropout = min(1., max(0., unit_dropout))
+    self.use_mc_dropout = use_mc_dropout
 
     self.supports_masking = True
     self.input_spec = InputSpec(min_ndim=2)
@@ -1280,11 +1288,23 @@ class DropConnectDense(Layer):
   def call(self, inputs, training=None):
       if training is None:
           training = K.learning_phase()
+      if self.use_mc_dropout:
+          training = True
 
+      #units dropout
+      def drop_inputs():
+          return K.dropout(inputs, self.unit_dropout)
+      if 0. < self.unit_dropout < 1.:
+          inputs = K.in_train_phase(drop_inputs, inputs, training=training)
+
+      #kernel dropout
       ones = array_ops.ones_like(self.kernel)
       def dropped_weight_connections():
-          return K.dropout(ones, self.kernel_dropout) * self.kernel_dropout
-      kern_dp_mask = K.in_train_phase(dropped_weight_connections, ones, training=training)
+          return K.dropout(ones, self.kernel_dropout) * (1 - self.kernel_dropout)
+      if 0. < self.kernel_dropout < 1.:
+          kern_dp_mask = K.in_train_phase(dropped_weight_connections, ones, training=training)
+      else:
+          kern_dp_mask = ones
 
       rank = len(inputs.shape)
       if rank > 2:
@@ -1329,7 +1349,9 @@ class DropConnectDense(Layer):
             regularizers.serialize(self.activity_regularizer),
         'kernel_constraint': constraints.serialize(self.kernel_constraint),
         'bias_constraint': constraints.serialize(self.bias_constraint),
-        'kernel_dropout': self.kernel_dropout
+        'kernel_dropout': self.kernel_dropout,
+        'unit_dropout': self.unit_dropout,
+        'use_mc_dropout': self.use_mc_dropout
     }
     base_config = super(DropConnectDense, self).get_config()
     return dict(list(base_config.items()) + list(config.items()))
